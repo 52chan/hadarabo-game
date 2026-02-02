@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>歴代・極潤ボトルを探せ！</title>
+
+<style>
+  *{ box-sizing: border-box; }
+  :root{
+    --cellW: 52px;
+    --cellH: 180px;
+    --gap: 8px;
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: system-ui, -apple-system, "Segoe UI",
+      "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    margin: 0;
+    background: #fff;
+  }
+  .app{
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .top{ padding: 12px 14px 8px; }
+  h1{ font-size: 18px; margin: 0 0 8px; }
+  .bar{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    align-items: center;
+  }
+  select, button{ font-size: 13px; padding: 4px 8px; }
+  #timer{ font-variant-numeric: tabular-nums; }
+  #status{ font-weight: 700; }
+
+  /* ★縦中央をやめて上寄せ + 余白多め */
+  .stage{
+    flex: 1;
+    display: flex;
+    justify-content: center;   /* 横中央 */
+    align-items: flex-start;    /* ★上寄せ */
+    padding: 18px 16px 30px;    /* ★下を厚めに（上下惜しい対策） */
+    overflow: hidden;
+  }
+
+  .grid{
+    display: grid;
+    gap: var(--gap);
+    justify-content: center;
+    align-content: start; /* ★上から積む */
+  }
+
+  .cell{
+    width: var(--cellW);
+    height: var(--cellH);
+    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: rgba(0,0,0,0.02);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    overflow: hidden;
+    padding: 2px;
+  }
+
+  .cell img{
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    display: block;
+  }
+
+  .cell.correct{ outline: 3px solid rgba(0,180,90,.6); }
+  .cell.wrong{
+    outline: 3px solid rgba(220,0,0,.45);
+    animation: shake .25s linear;
+  }
+  @keyframes shake{
+    25%{ transform: translateX(-2px); }
+    50%{ transform: translateX(2px); }
+    75%{ transform: translateX(-1px); }
+  }
+</style>
+</head>
+
+<body>
+<div class="app">
+  <div class="top">
+    <h1>歴代・極潤ボトルを探せ！</h1>
+    <div class="bar">
+      <label>マス数
+       <select id="size">
+  <option value="6" selected>6×6（やさしめ）</option>
+  <option value="8">8×8（ふつう）</option>
+  <option value="10">10×10（むずい）</option>
+  <option value="12">12×12（鬼）</option>
+  <option value="14">14×14（人間やめる）</option>
+</select>
+
+      </label>
+      <button id="restart">リトライ</button>
+      <span>⏱ <span id="timer">0.00s</span></span>
+      <span id="status">旧デザインのボトルを1本だけ探してクリック！</span>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div id="grid" class="grid"></div>
+  </div>
+</div>
+
+<script>
+const IMG_NEW = "new.png";
+const IMG_OLD = "old.png";
+
+const stageEl   = document.getElementById("stage");
+const gridEl    = document.getElementById("grid");
+const sizeEl    = document.getElementById("size");
+const restartEl = document.getElementById("restart");
+const timerEl   = document.getElementById("timer");
+const statusEl  = document.getElementById("status");
+
+let answerIndex = 0;
+let startedAt = 0;
+let rafId = 0;
+let finished = false;
+
+function getImageRatio(src){
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalHeight / img.naturalWidth);
+    img.onerror = () => resolve(3.6);
+    img.src = src + "?v=" + Date.now();
+  });
+}
+
+function startTimer(){
+  startedAt = performance.now();
+  finished = false;
+  cancelAnimationFrame(rafId);
+  const tick = () => {
+    const t = (performance.now() - startedAt) / 1000;
+    timerEl.textContent = t.toFixed(2) + "s";
+    if(!finished) rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+function stopTimer(){
+  finished = true;
+  cancelAnimationFrame(rafId);
+}
+
+async function calcCellSize(n){
+  const gap = 8;
+  const rect = stageEl.getBoundingClientRect();
+
+  // ★上下が惜しいので縦をさらに余らせる（-48→-72）
+  const availW = rect.width  - 24;
+  const availH = rect.height - 72;
+
+  const rNew = await getImageRatio(IMG_NEW);
+  const rOld = await getImageRatio(IMG_OLD);
+  const ratio = Math.max(rNew, rOld) * 1.03; // ★余裕3%
+
+  const wByWidth  = Math.floor((availW - gap * (n - 1)) / n);
+  const wByHeight = Math.floor((availH - gap * (n - 1)) / (n * ratio));
+
+  let w = Math.min(wByWidth, wByHeight);
+  w = Math.max(40, w);
+
+  // ★1px余らせる（端数で上下切れるのを潰す）
+  const h = Math.floor(w * ratio) - 1;
+
+  document.documentElement.style.setProperty("--cellW", w + "px");
+  document.documentElement.style.setProperty("--cellH", h + "px");
+  document.documentElement.style.setProperty("--gap", gap + "px");
+}
+
+async function buildGrid(){
+  const n = Number(sizeEl.value);
+
+  await new Promise(r => requestAnimationFrame(r));
+  await calcCellSize(n);
+
+  gridEl.innerHTML = "";
+  gridEl.style.gridTemplateColumns = `repeat(${n}, var(--cellW))`;
+
+  const total = n * n;
+  answerIndex = Math.floor(Math.random() * total);
+
+  for(let i=0;i<total;i++){
+    const cell = document.createElement("div");
+    cell.className = "cell";
+
+    const img = document.createElement("img");
+    img.alt = "極潤ボトル";
+    img.src = (i === answerIndex) ? (IMG_OLD + "?v=" + Date.now()) : (IMG_NEW + "?v=" + Date.now());
+    cell.appendChild(img);
+
+    cell.addEventListener("click", () => {
+      if(finished) return;
+      if(i === answerIndex){
+        cell.classList.add("correct");
+        stopTimer();
+        statusEl.textContent = `正解！ 🎉 ${timerEl.textContent}`;
+      }else{
+        cell.classList.remove("wrong");
+        void cell.offsetWidth;
+        cell.classList.add("wrong");
+        statusEl.textContent = "惜しい！別の場所！";
+      }
+    });
+
+    gridEl.appendChild(cell);
+  }
+
+  statusEl.textContent = "旧デザインのボトルを1本だけ探してクリック！";
+  timerEl.textContent = "0.00s";
+  startTimer();
+}
+
+restartEl.addEventListener("click", buildGrid);
+sizeEl.addEventListener("change", buildGrid);
+window.addEventListener("resize", buildGrid);
+
+buildGrid();
+</script>
+</body>
+</html>
